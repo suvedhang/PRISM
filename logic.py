@@ -28,11 +28,16 @@ BACKUP_DATA = {
 def fetch_news(topic, region="Global"):
     api_key = os.getenv("GNEWS_API_KEY")
     
-    # MODIFY QUERY BASED ON REGION
+    # ENHANCED REGION LOGIC
     search_query = topic
     if region == "India": search_query += " India"
     elif region == "USA": search_query += " USA"
     elif region == "Europe": search_query += " Europe"
+    elif region == "UK": search_query += " UK"
+    elif region == "Canada": search_query += " Canada"
+    elif region == "Australia": search_query += " Australia"
+    elif region == "Middle East": search_query += " Middle East"
+    elif region == "Asia": search_query += " Asia"
     
     url = f"https://gnews.io/api/v4/search?q={search_query}&lang=en&max=5&apikey={api_key}"
     try:
@@ -116,12 +121,10 @@ def get_analysis(topic, settings=None):
     if settings is None:
         settings = {"region": "Global", "intensity": "Standard"}
 
-    # 1. HANDLE DEMO MODE
     if DEMO_MODE:
         user_input = topic.lower()
         if "ai" in user_input: return BACKUP_DATA["ai"]
         if "crypto" in user_input or "bitcoin" in user_input: return BACKUP_DATA["crypto"]
-        # Mock Fallback
         return {
             "topic": topic,
             "critic": { "title": "Critical View", "points": ["Concerns about safety", "High costs", "Regulation issues"] },
@@ -129,7 +132,6 @@ def get_analysis(topic, settings=None):
             "proponent": { "title": "Positive View", "points": ["Innovation driver", "Economic growth", "Sustainability"] }
         }
 
-    # 2. REAL ONLINE MODE
     print(f"Fetching news for {topic} in {settings['region']}...")
     news_text = fetch_news(topic, settings['region'])
     
