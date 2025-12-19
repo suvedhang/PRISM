@@ -1,0 +1,29 @@
+{
+    "Bitcoin": {
+        "topic": "Bitcoin",
+        "critic": {
+            "title": "Environmental Impact",
+            "points": [
+                "High energy consumption",
+                "Used for illicit transactions",
+                "Market volatility risks"
+            ]
+        },
+        "facts": {
+            "title": "Market Data",
+            "points": [
+                "Current price ~$95k",
+                "El Salvador legal tender",
+                "Halving event occurred in 2024"
+            ]
+        },
+        "proponent": {
+            "title": "Digital Gold",
+            "points": [
+                "Decentralized finance",
+                "Hedge against inflation",
+                "Financial sovereignty"
+            ]
+        }
+    }
+}
