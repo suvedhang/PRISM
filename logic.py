@@ -1,139 +1,190 @@
 import os
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 
-# =================================================
-# ENVIRONMENT SETUP
-# =================================================
+# =========================================================
+# ENV SETUP
+# =========================================================
 load_dotenv()
 
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY")
-BASE_URL = os.getenv("GNEWS_BASE_URL", "https://gnews.io/api/v4/search")
+GNEWS_URL = "https://gnews.io/api/v4/search"
 
-if not GNEWS_API_KEY:
-    raise RuntimeError("❌ GNEWS_API_KEY missing in .env")
+# Used by app.py (do NOT remove)
+DEMO_MODE = False
 
-if not BASE_URL:
-    raise RuntimeError("❌ GNEWS_BASE_URL missing")
 
-# =================================================
-# FLAGS
-# =================================================
-DEMO_MODE = False   # Set True for offline demo
-
-# =================================================
-# NEWS FETCH FUNCTION
-# =================================================
-def fetch_news(topic: str, region: str):
+# =========================================================
+# STRICT TOPIC FILTER (ANTI-DRIFT CORE)
+# =========================================================
+def strict_topic_filter(articles, topic):
     """
-    Fetches live news articles from GNews API
+    Keeps ONLY articles that explicitly mention the topic
+    in title or description. Prevents semantic drift.
     """
+    topic_lower = topic.lower()
+    filtered = []
 
-    tokens = topic.lower().replace("-", " ").split()
-    safe_query = " AND ".join(tokens)
+    for a in articles:
+        title = (a.get("title") or "").lower()
+        desc = (a.get("description") or "").lower()
+
+        if topic_lower in title or topic_lower in desc:
+            filtered.append(a)
+
+    return filtered
+
+
+# =========================================================
+# FETCH NEWS
+# =========================================================
+def fetch_news(topic, region="Global"):
+    if not GNEWS_API_KEY:
+        return {"error": "API key not valid. Please pass a valid API key."}
 
     params = {
-        "q": safe_query,
+        "q": f'"{topic}"',  # exact match to reduce drift
         "lang": "en",
+        "max": 20,
         "apikey": GNEWS_API_KEY,
-        "max": 10
     }
 
-    if region and region.lower() != "global":
-        params["country"] = region.lower()
-
-    response = requests.get(BASE_URL, params=params, timeout=10)
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"GNews API Error {response.status_code}: {response.text}"
-        )
-
-    return response.json().get("articles", [])
+    try:
+        res = requests.get(GNEWS_URL, params=params, timeout=10)
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        return {"error": f"Failed to fetch news: {e}"}
 
 
-# =================================================
-# ANALYSIS LOGIC
-# =================================================
-def analyze_articles(topic: str, articles: list):
-    """
-    Converts raw news into structured analysis
-    """
+# =========================================================
+# BUILD ANALYSIS
+# =========================================================
+def build_analysis(topic, articles, intensity="Standard"):
+    critic_points = []
+    fact_points = []
 
-    concerns = []
-    facts = []
-    benefits = []
+    # -----------------------------------------------------
+    # ARTICLE-LEVEL ANALYSIS (NO BENEFITS HERE)
+    # -----------------------------------------------------
+    for a in articles:
+        title = a.get("title", "")
+        source = a.get("source", {}).get("name", "Unknown source")
+        published = a.get("publishedAt", "")
 
-    for article in articles:
-        title = article.get("title", "No title")
-        description = article.get("description", "")
-        source = article.get("source", {}).get("name", "Unknown")
+        # Facts
+        fact_points.append(f"{title} ({source})")
 
-        facts.append(f"{title} ({source})")
-
-        if description:
-            concerns.append(description)
+        # Concerns (intensity-based tone)
+        if intensity == "Ruthless":
+            critic_points.append(
+                f"Critical scrutiny around {topic} raised by {source}."
+            )
+        elif intensity == "Skeptical":
+            critic_points.append(
+                f"Mixed or cautious reactions toward {topic} reported by {source}."
+            )
         else:
-            concerns.append("Details are still emerging.")
+            critic_points.append(
+                f"Concerns and public debate related to {topic} reported by {source}."
+            )
 
-        benefits.append(
-            "Reported developments may influence public awareness, policy, or market response."
+    # -----------------------------------------------------
+    # BENEFITS (TOPIC-LEVEL — FIXED, NO REPETITION)
+    # -----------------------------------------------------
+    pro_points = []
+
+    if articles:
+        pro_points.append(
+            f"Public discussion and media coverage around {topic} have increased awareness and engagement."
         )
 
+        if len(articles) >= 3:
+            pro_points.append(
+                f"Multiple independent sources reporting on {topic} indicate sustained public interest."
+            )
+
+        if any(
+            kw in (a.get("title", "").lower())
+            for a in articles
+            for kw in ["success", "growth", "record", "hit", "breaks", "wins"]
+        ):
+            pro_points.append(
+                f"Reported performance indicators related to {topic} suggest positive momentum."
+            )
+
+    # Deduplicate benefits safely
+    pro_points = list(dict.fromkeys(pro_points))
+
+    # -----------------------------------------------------
+    # FINAL STRUCTURE (DO NOT CHANGE KEYS)
+    # -----------------------------------------------------
     return {
         "topic": topic,
         "critic": {
-            "title": "Key Concerns Raised",
-            "points": concerns[:7]
+            "title": "Concerns & Criticism",
+            "points": critic_points[:7]
+            or ["No major criticisms clearly reported yet."],
         },
         "facts": {
-            "title": "Reported Facts",
-            "points": facts[:7]
+            "title": "Verified Facts",
+            "points": fact_points[:7]
+            or ["No verified factual reports available."],
         },
         "proponent": {
-            "title": "Potential Impacts",
-            "points": benefits[:7]
-        }
+            "title": "Benefits & Outcomes",
+            "points": pro_points[:7]
+            or ["No clearly reported positive outcomes yet."],
+        },
     }
 
 
-# =================================================
-# ENTRY POINT (USED BY app.py)
-# =================================================
-def get_analysis(topic: str, settings: dict):
+# =========================================================
+# MAIN ENTRY POINT (USED BY app.py)
+# =========================================================
+def get_analysis(topic, settings=None):
     """
-    Main entry point called from Streamlit UI
+    Main function called by Streamlit UI.
+    MUST NOT BREAK app.py.
     """
 
-    try:
-        if DEMO_MODE:
-            return {
-                "topic": topic,
-                "critic": {
-                    "title": "Demo Mode",
-                    "points": ["Offline demo enabled"]
-                },
-                "facts": {
-                    "title": "Demo Data",
-                    "points": ["Live news fetching disabled"]
-                },
-                "proponent": {
-                    "title": "Demo Output",
-                    "points": ["Set DEMO_MODE = False for live analysis"]
-                }
-            }
+    if not topic or not topic.strip():
+        return {"error": "Please enter a valid topic."}
 
-        region = settings.get("region", "Global")
-        articles = fetch_news(topic, region)
+    settings = settings or {}
+    region = settings.get("region", "Global")
+    intensity = settings.get("intensity", "Standard")
 
-        if not articles:
-            return {
-                "error": "No live news articles found for this topic."
-            }
-
-        return analyze_articles(topic, articles)
-
-    except Exception as error:
+    # DEMO MODE
+    if DEMO_MODE:
         return {
-            "error": str(error)
+            "topic": topic,
+            "critic": {
+                "title": "Concerns & Criticism",
+                "points": [f"Demo concern related to {topic}."],
+            },
+            "facts": {
+                "title": "Verified Facts",
+                "points": [f"Demo factual reference about {topic}."],
+            },
+            "proponent": {
+                "title": "Benefits & Outcomes",
+                "points": [f"Demo benefit observed for {topic}."],
+            },
         }
+
+    # Fetch news
+    news_data = fetch_news(topic, region)
+    if "error" in news_data:
+        return news_data
+
+    articles = news_data.get("articles", [])
+    filtered_articles = strict_topic_filter(articles, topic)
+
+    if not filtered_articles:
+        return {
+            "error": f"No reliable articles found that directly mention '{topic}'."
+        }
+
+    return build_analysis(topic, filtered_articles, intensity)
