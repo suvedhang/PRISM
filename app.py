@@ -1,30 +1,65 @@
 import streamlit as st
 import logic
+# ===============================
+# AUTH BRIDGE (DO NOT REMOVE)
+# ===============================
+from backend.auth.auth_utils import (
+    firebase_login as _firebase_login,
+    firebase_signup as _firebase_signup
+)
 
-# =========================================================
+def firebase_login(email: str, password: str):
+    """
+    Wrapper for Firebase login.
+    Keeps app.py isolated from auth implementation.
+    """
+    try:
+        return _firebase_login(email, password)
+    except Exception as e:
+        return False, str(e)
+
+def firebase_signup(email: str, password: str):
+    """
+    Wrapper for Firebase signup.
+    """
+    try:
+        return _firebase_signup(email, password)
+    except Exception as e:
+        return False, str(e)
+
+
+# ===============================
 # PAGE CONFIG
-# =========================================================
+# ===============================
 st.set_page_config(
-    page_title="PRISM - News Analyzer",
+    page_title="PRISM – News Analyzer",
     page_icon="💎",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# =========================================================
-# SESSION STATE
-# =========================================================
+ACCENT_COLOR = "#00D2FF"
+
+# ===============================
+# SESSION STATE INIT
+# ===============================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if "user_email" not in st.session_state:
+    st.session_state.user_email = None
+
+if "active_tab" not in st.session_state:
+    st.session_state.active_tab = "home"
+
+if "search_query" not in st.session_state:
+    st.session_state.search_query = ""
+
 if "history" not in st.session_state:
     st.session_state.history = []
 
 if "results_cache" not in st.session_state:
     st.session_state.results_cache = {}
-
-if "search_query" not in st.session_state:
-    st.session_state.search_query = ""
-
-if "active_tab" not in st.session_state:
-    st.session_state.active_tab = "trending"
 
 if "region" not in st.session_state:
     st.session_state.region = "Global"
@@ -32,230 +67,230 @@ if "region" not in st.session_state:
 if "intensity" not in st.session_state:
     st.session_state.intensity = "Standard"
 
-ACCENT_COLOR = "#00D2FF"
-
-# =========================================================
-# CALLBACKS
-# =========================================================
-def click_history(topic):
-    st.session_state.search_query = topic
-    st.session_state.active_tab = "results"
-    if topic not in st.session_state.results_cache:
-        run_analysis(topic)
-
-
-def run_analysis(topic):
-    settings = {
-        "region": st.session_state.region,
-        "intensity": st.session_state.intensity,
-    }
-
-    with st.spinner(f"💎 Refracting news for '{topic}'..."):
-        data = logic.get_analysis(topic, settings)
-
-        if "error" not in data:
-            if topic not in st.session_state.history:
-                st.session_state.history.append(topic)
-            st.session_state.results_cache[topic] = data
-            st.session_state.active_tab = "results"
-        else:
-            st.error(data["error"])
-
-
-def clear_history():
-    st.session_state.history.clear()
-    st.session_state.results_cache.clear()
-    st.session_state.active_tab = "trending"
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown("## 💎 PRISM")
-    st.caption("Media Bias & News Intelligence")
-
-    st.divider()
-
-    with st.expander("⚙️ Intelligence Config", expanded=True):
-        st.selectbox(
-            "🌍 Search Region",
-            ["Global", "India", "USA", "UK", "Europe", "Canada", "Australia"],
-            key="region",
-        )
-        st.select_slider(
-            "🔥 Critic Intensity",
-            ["Standard", "Skeptical", "Ruthless"],
-            key="intensity",
-        )
-
-        demo = st.checkbox("🔌 Offline Demo Mode", value=logic.DEMO_MODE)
-        logic.DEMO_MODE = demo
-
-        if st.button("🗑️ Purge Cache"):
-            clear_history()
-            st.rerun()
-
-    st.divider()
-
-    st.subheader("🕒 History")
-    if st.session_state.history:
-        for topic in reversed(st.session_state.history):
-            st.button(f"📄 {topic}", on_click=click_history, args=(topic,))
-    else:
-        st.caption("No searches yet.")
-
-# =========================================================
-# GLOBAL CSS (FIXED UI POLISH)
-# =========================================================
-st.markdown(
-    f"""
+# ===============================
+# SHARED CSS (LOGIN + MAIN MATCH)
+# ===============================
+st.markdown(f"""
 <style>
 .stApp {{
     background-color: #0E1117;
     color: #E0E0E0;
 }}
 
-.news-card {{
+input {{
+    background-color: #1A1C24 !important;
+    color: #E0E0E0 !important;
+    border-radius: 12px !important;
+}}
+
+button {{
+    border-radius: 12px !important;
+}}
+
+.card {{
     background-color: #1A1C24;
     border: 1px solid #333;
     border-radius: 15px;
     padding: 20px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
 }}
 
-.meta-bar {{
+.accent {{
     color: {ACCENT_COLOR};
-    font-size: 0.85rem;
-    margin-bottom: 15px;
-}}
-
-.badge {{
-    display: inline-block;
-    padding: 4px 10px;
-    border-radius: 8px;
-    background: #1A1C24;
-    border: 1px solid #333;
-    margin-right: 8px;
 }}
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
-# =========================================================
-# HEADER
-# =========================================================
-c1, c2 = st.columns([1, 8])
-with c1:
-    st.markdown(
-        f"""
-<svg width="60" height="60" viewBox="0 0 24 24" fill="none">
-<path d="M12 2L2 22H22L12 2Z" stroke="#E0E0E0" stroke-width="2"/>
-<path d="M12 6L12 22" stroke="{ACCENT_COLOR}" stroke-width="2"/>
-</svg>
-""",
-        unsafe_allow_html=True,
-    )
+# ===============================
+# AUTH PAGE
+# ===============================
+def render_login():
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("## 🔐 Login to **PRISM**")
+    st.caption("Refracting the Truth from the Noise")
 
-with c2:
-    st.title("PRISM")
-    st.caption("Refracting Truth from Media Noise")
+    tab1, tab2 = st.tabs(["Login", "Create Account"])
 
-# =========================================================
-# SEARCH BAR
-# =========================================================
-col1, col2 = st.columns([5, 1])
-with col1:
-    st.text_input(
-        "Search",
-        placeholder="Enter topic (movie, tech, politics, crypto...)",
-        label_visibility="collapsed",
-        key="search_query",
-    )
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_pass")
 
-with col2:
-    analyze_clicked = st.button("Analyze 🚀")
+        if st.button("Login"):
+            success, msg = logic.firebase_login(email, password)
+            if success:
+                st.session_state.authenticated = True
+                st.session_state.user_email = email
+                st.session_state.active_tab = "home"
+                st.rerun()
+            else:
+                st.error(msg)
 
-if analyze_clicked and st.session_state.search_query:
-    run_analysis(st.session_state.search_query)
+    with tab2:
+        email = st.text_input("New Email", key="signup_email")
+        password = st.text_input("New Password", type="password", key="signup_pass")
 
-# =========================================================
-# RESULTS VIEW
-# =========================================================
-if (
-    st.session_state.active_tab == "results"
-    and st.session_state.search_query
-    and st.session_state.search_query in st.session_state.results_cache
-):
-    data = st.session_state.results_cache[st.session_state.search_query]
+        if st.button("Create Account"):
+            success, msg = logic.firebase_signup(email, password)
+            if success:
+                st.success("Account created. Please login.")
+            else:
+                st.error(msg)
 
-    st.markdown(f"### 🔍 Analysis for **{data['topic']}**")
+# ===============================
+# LOGOUT
+# ===============================
+def logout():
+    st.session_state.authenticated = False
+    st.session_state.user_email = None
+    st.session_state.active_tab = "home"
+    st.session_state.search_query = ""
+    st.rerun()
 
-    st.markdown(
-        f"""
-<div class="meta-bar">
-<span class="badge">Bias: {data.get('bias', 'Neutral')}</span>
-<span class="badge">Confidence: {data.get('confidence', 'N/A')}</span>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+# ===============================
+# CALLBACKS
+# ===============================
+def click_history(topic):
+    st.session_state.search_query = topic
+    run_analysis(topic)
 
-    st.markdown(f"**Why this matters:** {data.get('why_it_matters', '')}")
-    st.markdown("---")
+def run_analysis(topic):
+    cache_key = f"{topic}_{st.session_state.intensity}"
 
-    c1, c2, c3 = st.columns(3)
+    settings = {
+        "region": st.session_state.region,
+        "intensity": st.session_state.intensity
+    }
 
+    with st.spinner(f"💎 Analyzing '{topic}'..."):
+        if cache_key not in st.session_state.results_cache:
+            data = logic.get_analysis(topic, settings)
+            if "error" in data:
+                st.error(data["error"])
+                return
+
+            st.session_state.results_cache[cache_key] = data
+            if topic not in st.session_state.history:
+                st.session_state.history.append(topic)
+
+        st.session_state.active_tab = "results"
+
+# ===============================
+# MAIN APP (AUTHENTICATED)
+# ===============================
+def render_app():
+    # ---------- SIDEBAR ----------
+    with st.sidebar:
+        st.success(f"👤 Logged in as\n\n{st.session_state.user_email}")
+        st.button("Logout", on_click=logout)
+
+        st.divider()
+
+        st.subheader("⚙️ Intelligence Config")
+        st.selectbox(
+            "🌍 Search Region",
+            ["Global", "India", "USA", "UK", "Europe", "Asia"],
+            key="region"
+        )
+
+        st.select_slider(
+            "🔥 Critic Intensity",
+            options=["Standard", "Skeptical", "Ruthless"],
+            key="intensity"
+        )
+
+        st.checkbox("🔌 Offline Demo Mode", key="DEMO_MODE")
+        logic.DEMO_MODE = st.session_state.DEMO_MODE
+
+        if st.button("🗑️ Purge Cache"):
+            st.session_state.results_cache.clear()
+            st.session_state.active_tab = "home"
+            st.rerun()
+
+        st.divider()
+        st.subheader("🕒 History")
+        if st.session_state.history:
+            for h in reversed(st.session_state.history):
+                st.button(h, on_click=click_history, args=(h,))
+        else:
+            st.caption("No searches yet.")
+
+    # ---------- HEADER ----------
+    c1, c2 = st.columns([1, 8])
     with c1:
-        st.markdown(
-            f"""
-<div class="news-card">
-<h3 style="color:#FF4B4B">🛑 Concerns</h3>
-<ul>{"".join(f"<li>{p}</li>" for p in data["critic"]["points"])}</ul>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
+        st.markdown("### 🔺")
     with c2:
-        st.markdown(
-            f"""
-<div class="news-card">
-<h3 style="color:{ACCENT_COLOR}">⚖️ Key Data</h3>
-<ul>{"".join(f"<li>{p}</li>" for p in data["facts"]["points"])}</ul>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+        st.markdown("# PRISM")
+        st.caption("Refracting the Truth from the Noise")
 
-    with c3:
-        st.markdown(
-            f"""
-<div class="news-card">
-<h3 style="color:#00D26A">✅ Benefits</h3>
-<ul>{"".join(f"<li>{p}</li>" for p in data["proponent"]["points"])}</ul>
-</div>
-""",
-            unsafe_allow_html=True,
+    # ---------- SEARCH ----------
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.text_input(
+            "Search topic",
+            placeholder="Enter topic (movie, tech, politics, crypto...)",
+            key="search_query",
+            label_visibility="collapsed"
         )
+    with col2:
+        if st.button("Analyze 🚀"):
+            if st.session_state.search_query:
+                run_analysis(st.session_state.search_query)
 
-    if data.get("sources"):
-        st.markdown(
-            f"**Sources:** {', '.join(data['sources'])}"
-        )
+    # ---------- HOME (TRENDING) ----------
+    if st.session_state.active_tab == "home":
+        st.markdown("## 🔥 Trending Topics")
+        t1, t2, t3, t4 = st.columns(4)
+        with t1:
+            st.button("🤖 AI Regulation", on_click=click_history, args=("AI Regulation",))
+        with t2:
+            st.button("🌍 Climate Policy", on_click=click_history, args=("Climate Policy",))
+        with t3:
+            st.button("🪙 Crypto Regulation", on_click=click_history, args=("Crypto Regulation",))
+        with t4:
+            st.button("🚗 EV Transition", on_click=click_history, args=("EV Transition",))
 
-# =========================================================
-# TRENDING VIEW
-# =========================================================
+    # ---------- RESULTS ----------
+    if st.session_state.active_tab == "results":
+        key = f"{st.session_state.search_query}_{st.session_state.intensity}"
+        data = st.session_state.results_cache.get(key)
+
+        if data:
+            st.markdown(f"## 🔍 Analysis for **{data['topic']}**")
+            st.markdown(
+                f"<span class='accent'>Region: {st.session_state.region} | "
+                f"Intensity: {st.session_state.intensity}</span>",
+                unsafe_allow_html=True
+            )
+
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+                st.markdown(
+                    f"<div class='card'><h3>🛑 Concerns</h3>"
+                    + "".join(f"<li>{p}</li>" for p in data["critic"]["points"])
+                    + "</div>",
+                    unsafe_allow_html=True
+                )
+
+            with c2:
+                st.markdown(
+                    f"<div class='card'><h3>⚖️ Key Data</h3>"
+                    + "".join(f"<li>{p}</li>" for p in data["facts"]["points"])
+                    + "</div>",
+                    unsafe_allow_html=True
+                )
+
+            with c3:
+                st.markdown(
+                    f"<div class='card'><h3>✅ Benefits</h3>"
+                    + "".join(f"<li>{p}</li>" for p in data["proponent"]["points"])
+                    + "</div>",
+                    unsafe_allow_html=True
+                )
+
+# ===============================
+# ENTRY POINT
+# ===============================
+if not st.session_state.authenticated:
+    render_login()
 else:
-    st.markdown("### 🔥 Trending Topics")
-
-    t1, t2, t3, t4 = st.columns(4)
-    with t1:
-        st.button("🤖 AI Regulation", on_click=click_history, args=("AI Regulation",))
-    with t2:
-        st.button("🌍 Climate Policy", on_click=click_history, args=("Climate Policy",))
-    with t3:
-        st.button("🪙 Crypto Regulation", on_click=click_history, args=("Crypto Regulation",))
-    with t4:
-        st.button("🚗 EV Transition", on_click=click_history, args=("EV Transition",))
+    render_app()
