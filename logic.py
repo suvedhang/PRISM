@@ -4,24 +4,31 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # =========================================================
-# ENV SETUP
+# ENV & CONFIG
 # =========================================================
 load_dotenv()
 
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY")
 GNEWS_URL = "https://gnews.io/api/v4/search"
 
-# Used by app.py (do NOT remove)
+# Used by app.py (DO NOT REMOVE)
 DEMO_MODE = False
 
+# =========================================================
+# SAFETY CHECK
+# =========================================================
+if not GNEWS_API_KEY:
+    raise RuntimeError("❌ GNEWS_API_KEY missing in .env file")
 
 # =========================================================
-# STRICT TOPIC FILTER (ANTI-DRIFT CORE)
+# CORE UTILITIES
 # =========================================================
+
 def strict_topic_filter(articles, topic):
     """
-    Keeps ONLY articles that explicitly mention the topic
-    in title or description. Prevents semantic drift.
+    HARD FILTER:
+    Keeps only articles that explicitly mention the topic
+    in title or description. Prevents drift for ALL topics.
     """
     topic_lower = topic.lower()
     filtered = []
@@ -36,155 +43,148 @@ def strict_topic_filter(articles, topic):
     return filtered
 
 
+def extract_unique_points(articles, topic):
+    """
+    Extracts clean, non-duplicate bullet points.
+    """
+    seen = set()
+    points = []
+
+    for a in articles:
+        title = a.get("title")
+        if not title:
+            continue
+
+        clean = title.strip()
+        key = clean.lower()
+
+        if topic.lower() in key and key not in seen:
+            seen.add(key)
+            points.append(clean)
+
+    return points
+
+
+def calculate_confidence(articles):
+    """
+    Confidence Score based on:
+    - Article count
+    - Unique source count
+    """
+    sources = {
+        a.get("source", {}).get("name")
+        for a in articles
+        if a.get("source")
+    }
+
+    article_count = len(articles)
+    source_count = len(sources)
+
+    score = (article_count * 10) + (source_count * 15)
+    return f"{min(100, score)}%"
+
+
+def why_this_matters(topic, article_count):
+    if article_count >= 6:
+        return f"{topic} is receiving sustained coverage, indicating strong public and media relevance."
+    elif article_count >= 3:
+        return f"{topic} is emerging as an active discussion point."
+    else:
+        return f"{topic} currently has limited coverage but may gain relevance."
+
+
 # =========================================================
 # FETCH NEWS
 # =========================================================
-def fetch_news(topic, region="Global"):
-    if not GNEWS_API_KEY:
-        return {"error": "API key not valid. Please pass a valid API key."}
 
+def fetch_news(topic, region="Global"):
     params = {
-        "q": f'"{topic}"',  # exact match to reduce drift
+        "q": f'"{topic}"',
         "lang": "en",
-        "max": 20,
+        "max": 15,
         "apikey": GNEWS_API_KEY,
     }
 
-    try:
-        res = requests.get(GNEWS_URL, params=params, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e:
-        return {"error": f"Failed to fetch news: {e}"}
+    if region != "Global":
+        params["country"] = region.lower()
+
+    response = requests.get(GNEWS_URL, params=params, timeout=10)
+    response.raise_for_status()
+    return response.json().get("articles", [])
 
 
 # =========================================================
-# BUILD ANALYSIS
+# BUILD ANALYSIS OBJECT
 # =========================================================
-def build_analysis(topic, articles, intensity="Standard"):
-    critic_points = []
-    fact_points = []
 
-    # -----------------------------------------------------
-    # ARTICLE-LEVEL ANALYSIS (NO BENEFITS HERE)
-    # -----------------------------------------------------
-    for a in articles:
-        title = a.get("title", "")
-        source = a.get("source", {}).get("name", "Unknown source")
-        published = a.get("publishedAt", "")
+def build_analysis(topic, articles, intensity):
+    """
+    Builds final response used by app.py UI
+    """
+    fact_points = extract_unique_points(articles, topic)
+    critic_points = fact_points[:4]
+    pro_points = fact_points[4:8]
 
-        # Facts
-        fact_points.append(f"{title} ({source})")
-
-        # Concerns (intensity-based tone)
-        if intensity == "Ruthless":
-            critic_points.append(
-                f"Critical scrutiny around {topic} raised by {source}."
-            )
-        elif intensity == "Skeptical":
-            critic_points.append(
-                f"Mixed or cautious reactions toward {topic} reported by {source}."
-            )
-        else:
-            critic_points.append(
-                f"Concerns and public debate related to {topic} reported by {source}."
-            )
-
-    # -----------------------------------------------------
-    # BENEFITS (TOPIC-LEVEL — FIXED, NO REPETITION)
-    # -----------------------------------------------------
-    pro_points = []
-
-    if articles:
-        pro_points.append(
-            f"Public discussion and media coverage around {topic} have increased awareness and engagement."
-        )
-
-        if len(articles) >= 3:
-            pro_points.append(
-                f"Multiple independent sources reporting on {topic} indicate sustained public interest."
-            )
-
-        if any(
-            kw in (a.get("title", "").lower())
-            for a in articles
-            for kw in ["success", "growth", "record", "hit", "breaks", "wins"]
-        ):
-            pro_points.append(
-                f"Reported performance indicators related to {topic} suggest positive momentum."
-            )
-
-    # Deduplicate benefits safely
-    pro_points = list(dict.fromkeys(pro_points))
-
-    # -----------------------------------------------------
-    # FINAL STRUCTURE (DO NOT CHANGE KEYS)
-    # -----------------------------------------------------
     return {
         "topic": topic,
+        "confidence": calculate_confidence(articles),
+        "why_it_matters": why_this_matters(topic, len(articles)),
+
+        "facts": {
+            "title": "Verified Reports",
+            "points": fact_points[:7] or ["No verified factual reports available."]
+        },
+
         "critic": {
             "title": "Concerns & Criticism",
-            "points": critic_points[:7]
-            or ["No major criticisms clearly reported yet."],
+            "points": critic_points or ["No significant criticism reported yet."]
         },
-        "facts": {
-            "title": "Verified Facts",
-            "points": fact_points[:7]
-            or ["No verified factual reports available."],
-        },
+
         "proponent": {
             "title": "Benefits & Outcomes",
-            "points": pro_points[:7]
-            or ["No clearly reported positive outcomes yet."],
+            "points": pro_points or ["No clearly reported positive outcomes yet."]
         },
+
+        "sources": sorted({
+            a.get("source", {}).get("name", "Unknown")
+            for a in articles
+        })[:6],
     }
 
 
 # =========================================================
-# MAIN ENTRY POINT (USED BY app.py)
+# MAIN ENTRY (USED BY app.py)
 # =========================================================
+
 def get_analysis(topic, settings=None):
     """
-    Main function called by Streamlit UI.
-    MUST NOT BREAK app.py.
+    Main function called by Streamlit.
+    MUST NOT BREAK app.py
     """
-
     if not topic or not topic.strip():
         return {"error": "Please enter a valid topic."}
 
-    settings = settings or {}
-    region = settings.get("region", "Global")
-    intensity = settings.get("intensity", "Standard")
+    region = settings.get("region", "Global") if settings else "Global"
+    intensity = settings.get("intensity", "Standard") if settings else "Standard"
 
-    # DEMO MODE
-    if DEMO_MODE:
-        return {
-            "topic": topic,
-            "critic": {
-                "title": "Concerns & Criticism",
-                "points": [f"Demo concern related to {topic}."],
-            },
-            "facts": {
-                "title": "Verified Facts",
-                "points": [f"Demo factual reference about {topic}."],
-            },
-            "proponent": {
-                "title": "Benefits & Outcomes",
-                "points": [f"Demo benefit observed for {topic}."],
-            },
-        }
+    try:
+        articles = fetch_news(topic, region)
 
-    # Fetch news
-    news_data = fetch_news(topic, region)
-    if "error" in news_data:
-        return news_data
+        # HARD topic filtering (ANTI-DRIFT)
+        articles = strict_topic_filter(articles, topic)
 
-    articles = news_data.get("articles", [])
-    filtered_articles = strict_topic_filter(articles, topic)
+        if not articles:
+            return {
+                "topic": topic,
+                "confidence": "0%",
+                "why_it_matters": f"No credible reports found specifically about {topic}.",
+                "facts": {"title": "Verified Reports", "points": ["No relevant articles found."]},
+                "critic": {"title": "Concerns", "points": ["No data available."]},
+                "proponent": {"title": "Benefits", "points": ["No data available."]},
+                "sources": [],
+            }
 
-    if not filtered_articles:
-        return {
-            "error": f"No reliable articles found that directly mention '{topic}'."
-        }
+        return build_analysis(topic, articles, intensity)
 
-    return build_analysis(topic, filtered_articles, intensity)
+    except Exception as e:
+        return {"error": str(e)}
