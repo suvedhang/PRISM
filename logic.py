@@ -2,10 +2,11 @@ import os
 import json
 import requests
 import google.generativeai as genai
-from dotenv import load_dotenv
-
 # --- CONFIGURATION ---
+from dotenv import load_dotenv
 load_dotenv()
+
+
 DEMO_MODE = False 
 
 # --- HARDCODED BACKUP DATA ---
@@ -24,12 +25,18 @@ def call_gemini_api(prompt, api_key):
     Forces v1alpha to bypass 404 errors on v1beta endpoints.
     """
     # 1. Configure with specific version
-    genai.configure(api_key=api_key, transport='rest')
+    genai.configure(api_key=api_key)
     
-    print(f"\n📡 Connecting to Gemini (v1alpha)...")
+    print(f"\n📡 Connecting to Gemini...")
     
     # List of models to try
-    models = ['gemini-1.5-flash', 'gemini-pro', 'models/gemini-1.5-flash']
+    # Prioritize known working model found in testing
+    models = ['models/gemini-2.0-flash-exp', 'gemini-2.0-flash-exp', 'models/gemini-1.5-flash']
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods and m.name not in models:
+                models.append(m.name)
+    except: pass
     
     for model_name in models:
         try:
@@ -48,19 +55,26 @@ def call_gemini_api(prompt, api_key):
 
 def call_gemini_raw_fallback(prompt, api_key):
     print("⚠️ Library failed. Trying Raw REST API...")
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     payload = { "contents": [{ "parts": [{"text": prompt}] }] }
     try:
         res = requests.post(url, headers=headers, json=payload)
         if res.status_code == 200:
             return res.json()['candidates'][0]['content']['parts'][0]['text']
-    except: pass
+        else:
+            print(f"❌ Raw API Failed: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"❌ Raw API Exception: {e}")
     return None
 
 # --- HELPER: FIX BROKEN DATA ---
 def validate_and_fix(data, original_topic):
     if not data or not isinstance(data, dict): data = {}
+    
+    # Normalize keys to lowercase
+    data = {k.lower(): v for k, v in data.items()}
+    
     if "topic" not in data: data["topic"] = original_topic
     
     defaults = {
@@ -70,8 +84,16 @@ def validate_and_fix(data, original_topic):
     }
     
     for key, default in defaults.items():
-        if key not in data or "points" not in data[key]:
+        # Handle missing key
+        if key not in data:
             data[key] = default
+        # Handle flat list input (convert to object)
+        elif isinstance(data[key], list):
+             data[key] = { "title": default["title"], "points": data[key] }
+        # Handle object but missing points
+        elif isinstance(data[key], dict) and "points" not in data[key]:
+             data[key] = default
+             
     return data
 
 # --- SEARCH OPTIMIZER ---
@@ -134,13 +156,21 @@ def get_analysis(topic, settings=None):
     if settings['intensity'] == "Skeptical": tone = "critical"
     elif settings['intensity'] == "Ruthless": tone = "aggressive"
     
+    json_format = """{
+    "critic": ["point 1", "point 2"],
+    "facts": ["point 1", "point 2"],
+    "proponent": ["point 1", "point 2"]
+}"""
+
     if news_text:
-        prompt = f"Analyze news about '{used_query}'. Tone: {tone}. Split into CRITIC, FACTS, PROPONENT. Return JSON. News: {news_text}"
+        prompt = f"Analyze news about '{used_query}'. Tone: {tone}. Return JSON with keys: critic, facts, proponent. values should be lists of strings. Format: {json_format}. News: {news_text}"
     else:
-        prompt = f"User searched '{topic}'. News failed. Use INTERNAL KNOWLEDGE. Tone: {tone}. Split into CRITIC, FACTS, PROPONENT. Return JSON."
+        prompt = f"User searched '{topic}'. News failed. Use INTERNAL KNOWLEDGE. Tone: {tone}. Return JSON with keys: critic, facts, proponent. values should be lists of strings. Format: {json_format}."
 
     # 3. Call AI
+    print(f"DEBUG: Prompt sent to AI:\n{prompt[:200]}...")
     result_text = call_gemini_api(prompt, api_key)
+    print(f"DEBUG: AI Output Raw:\n{result_text}")
     
     if result_text:
         try:
